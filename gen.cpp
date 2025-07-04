@@ -243,6 +243,12 @@ struct Chunk {
             // End of section compound
             put_u8(0);
         }
+        put_u8(11);  // TAG_Int_Array
+        put_str("Biomes");
+        put_u32(1024);  // Length of array
+        for (int i = 0; i < 1024; i++) {
+            put_u32(2);  // Biome ID for plains
+        }
         // End Level compound
         put_u8(0);
         // End root compound
@@ -383,7 +389,7 @@ int main() {
     Block dirt("minecraft", "dirt");
     Block grass("minecraft", "grass_block");
 
-    const int width = 512*2, depth = 512*2, height_limit = 128;
+    const int width = 512, depth = 512, height_limit = 128;
 
     for (int z = 0; z < depth; z++) {
         for (int x = 0; x < width; x++) {
