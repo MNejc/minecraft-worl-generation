@@ -4,6 +4,8 @@
 #include <array>
 #include <string>
 #include <random>
+#include <map>
+#include <memory>
 #include <cstdint>
 #include <cstring>
 #include <algorithm>
@@ -262,9 +264,6 @@ struct Region {
     }
     // Place a block in global coords (x,z up to 511). We assume region(0,0).
     void setBlock(Block* block, int x, int y, int z) {
-        if (x<0||z<0||x>=512||z>=512) {
-            std::cerr<<"Region setBlock out of region\n"; exit(1);
-        }
         int cx = x / 16;
         int cz = z / 16;
         int idx = index(cx, cz);
@@ -351,87 +350,57 @@ struct Region {
 };
 
 
+struct World {
+    std::map<std::pair<int, int>, std::shared_ptr<Region>> regions;
 
-// Additional code
-float fade(float t) { return t * t * t * (t * (t * 6 - 15) + 10); }
-
-float lerp(float a, float b, float t) { return a + t * (b - a); }
-
-float grad(int hash, float x, float y) {
-    int h = hash & 7;
-    float u = h < 4 ? x : y;
-    float v = h < 4 ? y : x;
-    return ((h & 1) ? -u : u) + ((h & 2) ? -2.0f * v : 2.0f * v);
-}
-
-float perlin(float x, float y, int seed = 0) {
-    int xi = (int)std::floor(x) & 255;
-    int yi = (int)std::floor(y) & 255;
-
-    float xf = x - std::floor(x);
-    float yf = y - std::floor(y);
-
-    float u = fade(xf);
-    float v = fade(yf);
-
-    static uint8_t p[512];
-    static bool initialized = false;
-    if (!initialized) {
-        for (int i = 0; i < 256; i++) p[i] = i;
-        std::shuffle(p, p + 256, std::mt19937(seed));
-        for (int i = 0; i < 256; i++) p[256 + i] = p[i];
-        initialized = true;
+    void setBlock(Block* block, int x, int y, int z) {
+        int rx = x / 512;
+        if (x < 0 && x % 512 != 0) rx--;
+        int rz = z / 512;
+        if (z < 0 && z % 512 != 0) rz--;
+        auto key = std::make_pair(rx, rz);
+        if (regions.find(key) == regions.end()) {
+            regions[key] = std::make_shared<Region>(0, 0);
+        }
+        regions[key]->setBlock(block, x, y, z);
     }
 
-    int aa = p[p[xi] + yi];
-    int ab = p[p[xi] + yi + 1];
-    int ba = p[p[xi + 1] + yi];
-    int bb = p[p[xi + 1] + yi + 1];
-
-    float x1 = lerp(grad(aa, xf, yf), grad(ba, xf - 1, yf), u);
-    float x2 = lerp(grad(ab, xf, yf - 1), grad(bb, xf - 1, yf - 1), u);
-
-    return (lerp(x1, x2, v) + 1.0f) * 0.5f; // normalize 0..1
-}
-
-float fbm(float x, float y, int octaves = 4, float lacunarity = 2.0f, float gain = 0.5f) {
-    float total = 0.0f, amplitude = 1.0f, frequency = 1.0f;
-    for (int i = 0; i < octaves; ++i) {
-        total += perlin(x * frequency, y * frequency) * amplitude;
-        amplitude *= gain;
-        frequency *= lacunarity;
+    void save() {
+        for (const auto& [key, region] : regions) {
+            int rx = key.first;
+            int rz = key.second;
+            std::string fname = "r." + std::to_string(rx) + "." + std::to_string(rz) + ".mca";
+            region->save(fname);
+            std::cout << "Saved region to " << fname << "\n";
+        }
     }
-    return total;
-}
+};
+
 
 int main() {
-    Region region(0, 0);
+    World world;
     Block stone("minecraft", "stone");
     Block dirt("minecraft", "dirt");
     Block grass("minecraft", "grass_block");
 
-    const int width = 512, depth = 512, height_limit = 128;
-    const float scale = 0.01f;
+    const int width = 512*2, depth = 512*2, height_limit = 128;
 
     for (int z = 0; z < depth; z++) {
         for (int x = 0; x < width; x++) {
-            // Get height using fbm-based Perlin
-            float h = fbm(x * scale, z * scale, 5);
-            int height = (int)(h * 64) + 64; // center at sea level
+            int h = (sin(x * 0.05) + sin(z * 0.06)) * 16 + 64; // center at sea level
+            for (int y = 0; y < h-3; y++)
+                world.setBlock(&stone, x, y, z);
+            for (int y = h-3; y < h; y++)
+                world.setBlock(&dirt, x, y, z);
+            world.setBlock(&grass, x, h, z);
 
-            for (int y = 0; y <= height; y++) {
-                if (y == height)
-                    region.setBlock(&grass, x, y, z);
-                else if (y >= height - 3)
-                    region.setBlock(&dirt, x, y, z);
-                else
-                    region.setBlock(&stone, x, y, z);
-            }
+
         }
     }
 
-    region.save("r.0.0.mca");
-    std::cout << "Saved perlin terrain to r.0.0.mca\n";
+    world.save();
+    std::cout << "Saved terrain to region files\n";
+
     return 0;
 }
 
